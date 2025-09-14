@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "FastAPI Dev",
+            "type": "python",
+            "request": "launch",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+            "module": "fastapi",
+            "args": [
+                "dev"
+            ],
+            "cwd": "${workspaceFolder}/core",
+            "console": "integratedTerminal"
+        }
+    ]
+}

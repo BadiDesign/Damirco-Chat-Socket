@@ -9,10 +9,11 @@ class UserModel(Base):
 
     id = Column(Integer, primary_key=True)
     is_admin = Column(Boolean, default=False)
-    mobile_number = Column(String, nullable=False)
+    mobile_number = Column(String, nullable=True)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     last_message_at = Column(DateTime, nullable=True)
     new_message_count = Column(Integer, default=0)
+    last_message_text = Column(String, nullable=True)
 
     messages = relationship("MessageModel", back_populates="conversation_user")

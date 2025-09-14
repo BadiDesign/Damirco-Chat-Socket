@@ -15,12 +15,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from pytest import Session
 import httpx
+from sqlalchemy.orm import Session
 
 from conversation.routes import router as conversation_routes
 from conversation.models import MessageModel
 from conversation.schemas import MessageReadSchema
+from chat_manager import ChatManager
 from core.database import get_db
 from users.models import UserModel
 from users.schemas import UserReadSchema
@@ -114,7 +115,7 @@ async def get():
     return HTMLResponse(html)
 
 
-async def validate_token(token: str, db: Session = Depends(get_db)) -> UserModel | None:
+async def validate_token(token: str, db: Session = Depends(get_db)) -> UserModel:
     token = "Bearer " + token
     headers = {
         "Authorization": token,
@@ -127,17 +128,15 @@ async def validate_token(token: str, db: Session = Depends(get_db)) -> UserModel
             headers=headers,
         )
     try:
-        print("json response", response.text)
         result = response.json()
+        if result.get("code") == "token_not_valid":
+            raise Exception("invalid_token")
         if not result.get("id"):
-            return None
+            raise Exception("user_not_found")
     except json.JSONDecodeError:
-        print("json.JSONDecodeError")
-        return None
-    print("search user in database")
+        raise Exception("json_decode_error")
     user = db.query(UserModel).filter(UserModel.id == result.get("id")).first()
     if not user:
-        print("user not found in database")
         user = UserModel(
             id=result.get("id"),
             mobile_number=result.get("mobile_number"),
@@ -169,63 +168,88 @@ async def websocket_endpoint(
         try:
             auth_data = json.loads(first_message)
         except json.JSONDecodeError:
-            await websocket.close(code=4001)
+            await websocket.close(code=4001, reason="json decode error")
             return
 
         if auth_data.get("type") != "auth" or not auth_data.get("token"):
-            await websocket.close(code=4002)
+            await websocket.close(code=4002, reason="auth data error")
             return
 
-        # اعتبارسنجی توکن اینجا
-        user_object = await validate_token(auth_data["token"], db)
-        if not user_object:
-            await websocket.close(code=4003)
+        try:
+            # اعتبارسنجی توکن اینجا
+            user_object = await validate_token(auth_data["token"], db)
+            print("user_object", user_object)
+        except Exception as e:
+            print("error", e)
+            await websocket.close(code=4003, reason=str(e))
             return
 
-        print("user_object", user_object)
-
-        # فقط اگر auth اوکی بود کانکت می‌کنیم
+        # فقط اگر auth اوکی بود کانکت می‌کنیم6
         await manager.connect(user_object.id, websocket)
+        print("connected", user_object.id)
+
         await manager.send_personal_message(
-            json.dumps({"message": "connected " + user_object.first_name}),
+            json.dumps(
+                {
+                    "type": "system",
+                    "data": {"message": "connected " + user_object.first_name},
+                }
+            ),
             user_object.id,
         )
-        for message in db.query(MessageModel).filter(
-            MessageModel.conversation_user_id == user_object.id
-        ):
+        if user_object.is_admin:
             await manager.send_personal_message(
-                json.dumps(
-                    {
-                        "text": message.text,
-                        "is_admin_message": message.is_admin_message,
-                        "is_seen": message.is_seen,
-                    }
-                ),
+                json.dumps(ChatManager.get_chats(db)),
                 user_object.id,
             )
+        else:
+            messages = ChatManager.get_messages_of_chat(user_object.id, db)
+            await manager.send_personal_message(
+                json.dumps(messages),
+                user_object.id,
+            )
+            ChatManager.seen_messages_of(user_object.id, False, db)
         try:
             while True:
                 data = await websocket.receive_text()
                 payload = json.loads(data)
-                db.add(
-                    MessageModel(
-                        conversation_user_id=user_object.id,
-                        text=payload.get("text"),
-                        is_admin_message=user_object.is_admin,
+                print("payload =>", payload)
+                if payload.get("type") == "get_messages":
+                    if not user_object.is_admin:
+                        await websocket.send_text(
+                            json.dumps({"error": "you are not admin"})
+                        )
+                    user_id = payload.get("data").get("user_id")
+                    chat_messages = ChatManager.get_messages_of_chat(user_id, db)
+                    await manager.send_personal_message(
+                        json.dumps(chat_messages),
+                        user_object.id,
                     )
-                )
-                user_object.last_message_at = datetime.datetime.now()
-                if user_object.new_message_count < 0:
-                    user_object.new_message_count = 1
-                else:
-                    user_object.new_message_count += 1
+                    ChatManager.seen_messages_of(user_id, True, db)
+                elif payload.get("type") == "send_message":
+                    await ChatManager.send_message(
+                        payload,
+                        user_object,
+                        db,
+                        websocket,
+                    )
+                elif payload.get("type") == "seen_message":
+                    ChatManager.seen_message(
+                        user_object, payload.get("data").get("message_id"), db
+                    )
+                    await ChatManager.send_seen_notification(
+                        user_object,
+                        payload.get("data").get("message_id"),
+                        db,
+                        websocket,
+                    )
 
-                db.commit()
         except WebSocketDisconnect:
             manager.disconnect(user_object.id, websocket)
             await manager.broadcast(f"Client #{user_object.id} left the chat")
 
     except WebSocketDisconnect:
+        await websocket.close(code=4004, reason="WebSocketDisconnect")
         print("WebSocketDisconnect")
         pass
 
