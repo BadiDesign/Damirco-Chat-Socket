@@ -1,8 +1,8 @@
-"""created models
+"""init tables
 
-Revision ID: a2ab5c50dc0c
+Revision ID: 955316debbb9
 Revises: 
-Create Date: 2025-09-13 22:49:46.624319
+Create Date: 2025-09-16 16:14:21.081693
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a2ab5c50dc0c'
+revision: str = '955316debbb9'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -35,7 +35,7 @@ def upgrade() -> None:
     op.create_table('messages',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
     sa.Column('text', sa.Text(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('conversation_user_id', sa.Integer(), nullable=False),
     sa.Column('url', sa.String(), nullable=True),
     sa.Column('is_seen', sa.Boolean(), nullable=True),

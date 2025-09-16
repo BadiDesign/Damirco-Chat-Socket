@@ -21,7 +21,7 @@ class MessageModel(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     text = Column(Text, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     conversation_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     conversation_user = relationship(

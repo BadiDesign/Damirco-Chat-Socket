@@ -59,60 +59,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(conversation_routes, prefix="/api/v1/conversation")
-
-
-html = """
-<!DOCTYPE html>
-<html>
-    <head>
-        <title>Chat</title>
-    </head>
-    <body>
-        <h1>WebSocket Chat</h1>
-        <h2>Your ID: <span id="ws-id"></span></h2>
-        <form action="" onsubmit="sendMessage(event)">
-            <input type="text" id="messageText" autocomplete="off"/>
-            <button>Send</button>
-        </form>
-        <ul id='messages'>
-        </ul>
-        <script>
-            var ws = new WebSocket("ws://"+ window.location.hostname +":8000/websocket", [], {});
-            ws.onmessage = function(event) {
-                var messages = document.getElementById('messages')
-                var message = document.createElement('li')
-                var content = document.createTextNode(event.data)
-                message.appendChild(content)
-                messages.appendChild(message)
-            };
-            ws.onopen = function(event) {
-                ws.send(JSON.stringify({
-                    "type": "auth",
-                    "token": localStorage.getItem("session_key").split(" ")[1],
-                }))
-            }
-            ws.onclose = function(event) {
-                console.log("disconnected", event)
-            }
-            function sendMessage(event) {
-                var input = document.getElementById("messageText")
-                ws.send(JSON.stringify({
-                    "type": "message",
-                    "text": input.value
-                }))
-                input.value = ''
-                event.preventDefault()
-            }
-        </script>
-    </body>
-</html>
-"""
-
 
 @app.get("/")
 async def get():
-    return HTMLResponse(html)
+    return HTMLResponse()
 
 
 async def validate_token(token: str, db: Session = Depends(get_db)) -> UserModel:
@@ -178,15 +128,12 @@ async def websocket_endpoint(
         try:
             # اعتبارسنجی توکن اینجا
             user_object = await validate_token(auth_data["token"], db)
-            print("user_object", user_object)
         except Exception as e:
-            print("error", e)
             await websocket.close(code=4003, reason=str(e))
             return
 
         # فقط اگر auth اوکی بود کانکت می‌کنیم6
         await manager.connect(user_object.id, websocket)
-        print("connected", user_object.id)
 
         await manager.send_personal_message(
             json.dumps(
@@ -213,7 +160,6 @@ async def websocket_endpoint(
             while True:
                 data = await websocket.receive_text()
                 payload = json.loads(data)
-                print("payload =>", payload)
                 if payload.get("type") == "get_messages":
                     if not user_object.is_admin:
                         await websocket.send_text(
@@ -243,95 +189,97 @@ async def websocket_endpoint(
                         db,
                         websocket,
                     )
-
+                elif payload.get("type") == "get_chats" and user_object.is_admin:
+                    await manager.send_personal_message(
+                        json.dumps(ChatManager.get_chats(db)),
+                        user_object.id,
+                    )
         except WebSocketDisconnect:
             manager.disconnect(user_object.id, websocket)
             await manager.broadcast(f"Client #{user_object.id} left the chat")
 
     except WebSocketDisconnect:
         await websocket.close(code=4004, reason="WebSocketDisconnect")
-        print("WebSocketDisconnect")
         pass
 
 
-@app.websocket("/websocket_old")
-async def websocket_endpoint_old(
-    websocket: WebSocket,
-    session_uid: str = Depends(get_uid_session_by_socket),
-    db: Session = Depends(get_db),
-):
-    await manager.connect(session_uid, websocket)
-    await manager.send_personal_message(
-        json.dumps({"message": "connected"}), session_uid
-    )
+# @app.websocket("/websocket_old")
+# async def websocket_endpoint_old(
+#     websocket: WebSocket,
+#     session_uid: str = Depends(get_uid_session_by_socket),
+#     db: Session = Depends(get_db),
+# ):
+#     await manager.connect(session_uid, websocket)
+#     await manager.send_personal_message(
+#         json.dumps({"message": "connected"}), session_uid
+#     )
 
-    for message in (
-        db.query(MessageModel)
-        .join(MessageModel.conversation_user)
-        .filter(UserModel.user_uid == session_uid)
-    ):
-        await manager.send_personal_message(
-            json.dumps(
-                {
-                    "text": message.text,
-                    "is_admin_message": message.is_admin_message,
-                    "is_seen": message.is_seen,
-                },
-            ),
-            session_uid,
-        )
-    try:
-        while True:
-            data = await websocket.receive_text()
-            user = db.query(UserModel).filter(UserModel.user_uid == session_uid).first()
-            payload = json.loads(data)
-            if user.is_admin:
-                chat_id = payload.get("chat_id")
-            else:
-                chat_id = user.user_uid
-            await manager.send_personal_message(json.dumps(payload), chat_id)
-            db.add(
-                MessageModel(
-                    conversation_user_id=user.id,
-                    text=payload.get("text"),
-                    is_admin_message=user.is_admin,
-                )
-            )
-            db.commit()
-    except WebSocketDisconnect:
-        manager.disconnect(session_uid, websocket)
-        await manager.broadcast(f"Client #{session_uid} left the chat")
-
-
-@app.post("/authenticate")
-def authenticate(
-    response: Response,
-    session_uid: Annotated[str | None, Cookie()] = None,
-    db: Session = Depends(get_db),
-):
-    print("session_uid", session_uid)
-    if session_uid:
-        user = db.query(UserModel).filter(UserModel.user_uid == session_uid).first()
-        if user:
-            return {"message": "already logged in", "user_uid": user.user_uid}
-    new_session_uid = str(uuid.uuid4())
-    response.set_cookie(
-        key="session_uid",
-        value=str(new_session_uid),
-        max_age=60 * 60 * 24 * 30,  # 30 روز
-        expires=datetime.datetime.now(datetime.timezone.utc)
-        + datetime.timedelta(days=30),  # روش دیگه
-        httponly=False,  # امنیت بیشتر
-        samesite="lax",  # یا "Strict"/"None"
-    )
-    db.add(UserModel(user_uid=new_session_uid, is_admin=False))
-    db.commit()
-    user = db.query(UserModel).filter(UserModel.user_uid == new_session_uid).first()
-    return {"message": "logged in " + new_session_uid, "user_uid": user.user_uid}
+#     for message in (
+#         db.query(MessageModel)
+#         .join(MessageModel.conversation_user)
+#         .filter(UserModel.user_uid == session_uid)
+#     ):
+#         await manager.send_personal_message(
+#             json.dumps(
+#                 {
+#                     "text": message.text,
+#                     "is_admin_message": message.is_admin_message,
+#                     "is_seen": message.is_seen,
+#                 },
+#             ),
+#             session_uid,
+#         )
+#     try:
+#         while True:
+#             data = await websocket.receive_text()
+#             user = db.query(UserModel).filter(UserModel.user_uid == session_uid).first()
+#             payload = json.loads(data)
+#             if user.is_admin:
+#                 chat_id = payload.get("chat_id")
+#             else:
+#                 chat_id = user.user_uid
+#             await manager.send_personal_message(json.dumps(payload), chat_id)
+#             db.add(
+#                 MessageModel(
+#                     conversation_user_id=user.id,
+#                     text=payload.get("text"),
+#                     is_admin_message=user.is_admin,
+#                 )
+#             )
+#             db.commit()
+#     except WebSocketDisconnect:
+#         manager.disconnect(session_uid, websocket)
+#         await manager.broadcast(f"Client #{session_uid} left the chat")
 
 
-@app.get("/messages", response_model=List[MessageReadSchema])
-def show_all_messages(
-    db: Session = Depends(get_db),
-):
-    return db.query(MessageModel).all()
+# @app.post("/authenticate")
+# def authenticate(
+#     response: Response,
+#     session_uid: Annotated[str | None, Cookie()] = None,
+#     db: Session = Depends(get_db),
+# ):
+#     if session_uid:
+#         user = db.query(UserModel).filter(UserModel.user_uid == session_uid).first()
+#         if user:
+#             return {"message": "already logged in", "user_uid": user.user_uid}
+#     new_session_uid = str(uuid.uuid4())
+#     response.set_cookie(
+#         key="session_uid",
+#         value=str(new_session_uid),
+#         max_age=60 * 60 * 24 * 30,  # 30 روز
+#         expires=datetime.datetime.now(datetime.timezone.utc)
+#         + datetime.timedelta(days=30),  # روش دیگه
+#         httponly=False,  # امنیت بیشتر
+#         samesite="lax",  # یا "Strict"/"None"
+#     )
+#     db.add(UserModel(user_uid=new_session_uid, is_admin=False))
+#     db.commit()
+#     user = db.query(UserModel).filter(UserModel.user_uid == new_session_uid).first()
+#     return {"message": "logged in " + new_session_uid, "user_uid": user.user_uid}
+
+
+# @app.get("/messages", response_model=List[MessageReadSchema])
+# def show_all_messages(
+#     db: Session = Depends(get_db),
+# ):
+#     return db.query(MessageModel).all()

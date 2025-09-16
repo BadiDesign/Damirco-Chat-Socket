@@ -4,10 +4,43 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+from core.config import settings
+from dotenv import load_dotenv
+import os
+from pathlib import Path
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+ENV_PATH = BASE_DIR / ".env"
+if ENV_PATH.exists():
+    load_dotenv(ENV_PATH)
+else:
+    print(".env file does not exists!")
+
+
 config = context.config
+if sqlalchemy_url := os.getenv("SQLALCHEMY_DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", sqlalchemy_url)
+elif os.getenv("POSTGRES_HOST"):
+    config.set_main_option(
+        "sqlalchemy.url",
+        (
+            f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}"
+            f"@{os.getenv('POSTGRES_HOST')}:{int(os.getenv('POSTGRES_PORT') or '5432')}/{os.getenv('POSTGRES_DB')}"
+        ),
+    )
+    print(
+        "HERE",
+        (
+            f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}"
+            f"@{os.getenv('POSTGRES_HOST')}:{int(os.getenv('POSTGRES_PORT') or '5432')}/{os.getenv('POSTGRES_DB')}"
+        ),
+    )
+else:
+    raise ValueError("SQLALCHEMY_DATABASE_URL not defined")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

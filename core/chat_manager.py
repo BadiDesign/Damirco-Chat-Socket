@@ -6,6 +6,21 @@ from conversation.models import MessageModel
 from users.models import UserModel
 from fastapi import WebSocket
 from core.ws_manager import manager
+from pydantic import BaseModel
+
+
+class MessageData(BaseModel):
+    id: int
+    text: str
+    url: str | None
+    is_admin_message: bool
+    is_seen: bool
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True  # (Pydantic v2) قبلاً orm_mode = True بود
+        orm_mode = True
+        json_encoders = {datetime.datetime: lambda v: v.isoformat()}
 
 
 class ChatManager:
@@ -24,17 +39,12 @@ class ChatManager:
     ):
         message = db.query(MessageModel).filter(MessageModel.id == message_id).first()
         if user_object.is_admin:
-            print(
-                "###SEND_SEEN_NOTIFICATION### user_object.is_admin",
-                user_object.is_admin,
-            )
             await manager.send_personal_message(
                 json.dumps(ChatManager.seen_message_dict(message_id)),
                 message.conversation_user_id,
             )
         else:
             for admin_user in ChatManager.get_admins(db):
-                print("###SEND_SEEN_NOTIFICATION### admin_user", admin_user)
                 await manager.send_personal_message(
                     json.dumps(ChatManager.seen_message_dict(message_id)),
                     admin_user.id,
@@ -65,6 +75,16 @@ class ChatManager:
             MessageModel.is_seen == False,
             MessageModel.is_admin_message != is_admin_viewing,
         ).update({"is_seen": True})
+        if is_admin_viewing:
+            db.query(UserModel).filter(
+                UserModel.id == chat_id,
+                UserModel.new_message_count < 0,
+            ).update({"new_message_count": 0})
+        else:
+            db.query(UserModel).filter(
+                UserModel.id == chat_id,
+                UserModel.new_message_count > 0,
+            ).update({"new_message_count": -1})
         db.commit()
 
     @staticmethod
@@ -73,13 +93,7 @@ class ChatManager:
         return {
             "type": "messages",
             "data": [
-                {
-                    "id": message.id,
-                    "text": message.text,
-                    "is_admin_message": message.is_admin_message,
-                    "is_seen": message.is_seen,
-                    "created_at": message.created_at.isoformat(),
-                }
+                MessageData.model_validate(message).model_dump(mode="json")
                 for message in messages
             ],
         }
@@ -103,13 +117,7 @@ class ChatManager:
         return {
             "type": "messages",
             "data": [
-                {
-                    "id": message.id,
-                    "text": message.text,
-                    "is_admin_message": message.is_admin_message,
-                    "is_seen": message.is_seen,
-                    "created_at": message.created_at.isoformat(),
-                }
+                MessageData.model_validate(message).model_dump(mode="json")
                 for message in messages
             ],
         }
@@ -149,6 +157,7 @@ class ChatManager:
             "data": {
                 "id": message.id,
                 "text": message.text,
+                "url": message.url,
                 "is_admin_message": message.is_admin_message,
                 "is_seen": message.is_seen,
                 "created_at": message.created_at.isoformat(),
@@ -177,11 +186,12 @@ class ChatManager:
         message = MessageModel(
             conversation_user_id=conversation_user_id,
             text=payload.get("text"),
+            url=payload.get("url") if not user_object.is_admin else None,
             is_admin_message=user_object.is_admin,
         )
         db.add(message)
-        conversation_user.last_message_at = datetime.datetime.now()
-        conversation_user.last_message_text = payload.get("text")
+        conversation_user.last_message_at = datetime.datetime.now(datetime.timezone.utc)
+        conversation_user.last_message_text = payload.get("text") or ""
         if user_object.is_admin:
             if conversation_user.new_message_count < 0:
                 conversation_user.new_message_count = 1
