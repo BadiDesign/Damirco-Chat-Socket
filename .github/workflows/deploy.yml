@@ -32,7 +32,6 @@ jobs:
           command: c
           cwd: "./"
           files: |
-            .server/
             core/
             captain.Dockerfile
             captain-entrypoint.sh
