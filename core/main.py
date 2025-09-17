@@ -196,7 +196,7 @@ async def websocket_endpoint(
                     )
         except WebSocketDisconnect:
             manager.disconnect(user_object.id, websocket)
-            await manager.broadcast(f"Client #{user_object.id} left the chat")
+            # await manager.broadcast(f"Client #{user_object.id} left the chat")
 
     except WebSocketDisconnect:
         await websocket.close(code=4004, reason="WebSocketDisconnect")
