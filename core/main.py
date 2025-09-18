@@ -202,6 +202,7 @@ async def websocket_endpoint(
                         user_object.id,
                     )
         except Exception as e:
+            print("Exception", e)
             manager.disconnect(user_object.id, websocket)
     except WebSocketDisconnect:
         print("WebSocketDisconnect")
