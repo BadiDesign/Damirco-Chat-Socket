@@ -142,8 +142,14 @@ class ChatManager:
                     "first_name": user.first_name,
                     "last_name": user.last_name,
                     "mobile_number": user.mobile_number,
-                    "last_message_at": user.last_message_at.isoformat(),
-                    "last_message_text": user.last_message_text,
+                    "last_message_at": (
+                        user.last_message_at.isoformat()
+                        if user.last_message_at
+                        else None
+                    ),
+                    "last_message_text": (
+                        user.last_message_text if user.last_message_text else None
+                    ),
                     "new_message_count": user.new_message_count,
                 }
                 for user in users
