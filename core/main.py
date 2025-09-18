@@ -148,12 +148,15 @@ async def websocket_endpoint(
             )
             print("manager.send_personal_message", user_object.id)
             if user_object.is_admin:
+                chats = ChatManager.get_chats(db)
+                print(user_object.id, "chats", chats)
                 await manager.send_personal_message(
-                    json.dumps(ChatManager.get_chats(db)),
+                    json.dumps(chats),
                     user_object.id,
                 )
             else:
                 messages = ChatManager.get_messages_of_chat(user_object.id, db)
+                print(user_object.id, "messages", messages)
                 await manager.send_personal_message(
                     json.dumps(messages),
                     user_object.id,
