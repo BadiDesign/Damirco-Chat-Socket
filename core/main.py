@@ -131,35 +131,39 @@ async def websocket_endpoint(
         except Exception as e:
             await websocket.close(code=4003, reason=str(e))
             return
-
+        print("user_object", user_object)
         # فقط اگر auth اوکی بود کانکت می‌کنیم6
         await manager.connect(user_object.id, websocket)
 
-        await manager.send_personal_message(
-            json.dumps(
-                {
-                    "type": "system",
-                    "data": {"message": "connected " + user_object.first_name},
-                }
-            ),
-            user_object.id,
-        )
-        if user_object.is_admin:
-            await manager.send_personal_message(
-                json.dumps(ChatManager.get_chats(db)),
-                user_object.id,
-            )
-        else:
-            messages = ChatManager.get_messages_of_chat(user_object.id, db)
-            await manager.send_personal_message(
-                json.dumps(messages),
-                user_object.id,
-            )
-            ChatManager.seen_messages_of(user_object.id, False, db)
+        print("manager.connect", user_object.id)
         try:
+            await manager.send_personal_message(
+                json.dumps(
+                    {
+                        "type": "system",
+                        "data": {"message": "connected " + user_object.first_name},
+                    }
+                ),
+                user_object.id,
+            )
+            print("manager.send_personal_message", user_object.id)
+            if user_object.is_admin:
+                await manager.send_personal_message(
+                    json.dumps(ChatManager.get_chats(db)),
+                    user_object.id,
+                )
+            else:
+                messages = ChatManager.get_messages_of_chat(user_object.id, db)
+                await manager.send_personal_message(
+                    json.dumps(messages),
+                    user_object.id,
+                )
+                ChatManager.seen_messages_of(user_object.id, False, db)
+            print("manager.send_personal_message", user_object.id)
             while True:
                 data = await websocket.receive_text()
                 payload = json.loads(data)
+                print("payload", payload)
                 if payload.get("type") == "get_messages":
                     if not user_object.is_admin:
                         await websocket.send_text(
@@ -194,12 +198,10 @@ async def websocket_endpoint(
                         json.dumps(ChatManager.get_chats(db)),
                         user_object.id,
                     )
-        except WebSocketDisconnect:
+        except Exception as e:
             manager.disconnect(user_object.id, websocket)
-            # await manager.broadcast(f"Client #{user_object.id} left the chat")
-
     except WebSocketDisconnect:
-        await websocket.close(code=4004, reason="WebSocketDisconnect")
+        print("WebSocketDisconnect")
         pass
 
 
