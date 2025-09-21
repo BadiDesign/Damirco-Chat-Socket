@@ -127,6 +127,7 @@ class ChatManager:
         return (
             db.query(UserModel)
             .filter(UserModel.is_admin == False)
+            .filter(UserModel.last_message_at != None)
             .order_by(UserModel.last_message_at.desc())
             .all()
         )
