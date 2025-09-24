@@ -165,6 +165,9 @@ async def websocket_endpoint(
             print("manager.send_personal_message", user_object.id)
             while True:
                 data = await websocket.receive_text()
+                if not manager.is_connected(user_object.id):
+                    await websocket.close(code=4004, reason="user disconnected")
+                    return
                 payload = json.loads(data)
                 print("payload", payload)
                 if payload.get("type") == "get_messages":

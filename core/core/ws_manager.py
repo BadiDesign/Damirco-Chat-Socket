@@ -18,9 +18,15 @@ class ConnectionManager:
             del self.active_connections[user_id]
 
     async def send_personal_message(self, message: str, user_id: int):
-        if user_id in self.active_connections:
-            for conn in self.active_connections[user_id]:
-                await conn.send_text(message)
+        try:
+            if user_id in self.active_connections:
+                for conn in self.active_connections[user_id]:
+                    await conn.send_text(message)
+        except Exception as e:
+            self.active_connections[user_id] = []
+
+    def is_connected(self, user_id: int):
+        return user_id in self.active_connections.keys()
 
     async def broadcast(self, message: str):
         for connections in self.active_connections.values():
